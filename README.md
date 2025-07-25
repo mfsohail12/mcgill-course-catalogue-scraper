@@ -1,0 +1,1 @@
+# mcgill-course-catalogue-scraper
