@@ -52,8 +52,8 @@ const scrapeCourse = async (course) => {
   let restrictions;
 
   for (let i = 0; i < bullets.length; i++) {
-    const prereqRegex = /^Prerequisites?:/;
-    const restrictionsRegex = /^Restrictions?:/;
+    const prereqRegex = /^Prerequisite(s|\(s\))?:/;
+    const restrictionsRegex = /^Restriction(s|\(s\))?:/;
 
     if (prereqRegex.test(bullets[i])) {
       prereqs = bullets[i].replace(prereqRegex, "").trim();
