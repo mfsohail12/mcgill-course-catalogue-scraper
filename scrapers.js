@@ -108,7 +108,7 @@ const scrapeCourse = async (course) => {
         messages: [
           {
             role: "system",
-            content: `Convert university course prerequisite strings to structured boolean expression strings using course codes and logic symbols (AND, OR, parentheses). Letters in course codes should be capitalized in the final output string. Ignore and remove phrases like "or equivalent", "permission of instructor", or anything else that does not relate to a specific course. If there are no course prerequisites, return an empty string.\n\nExamples:\nInput: "Math 350 or COMP 362 (or equivalent)."\nOutput: (MATH 350 OR COMP 362)\n\nInput: "COMP 251 and COMP 250 and (MATH 140 or MATH 240 or MATH 200)"\nOutput: COMP 251 AND COMP 250 AND (MATH 140 OR MATH 240 OR MATH 200)\n\nInput: "COMP 251 or equivalent, MATH 223"\nOutput: COMP 251 AND MATH 223\n\nInput: "MATH 140 or equivalent. COMP 202 or COMP 204 or COMP 208 (or equivalent)."\nOutput: "MATH 140 AND (COMP 202 OR COMP 204 OR COMP 208)"`,
+            content: `Convert university course prerequisite strings to structured boolean expression strings using course codes and logic symbols (AND, OR, parentheses). Letters in course codes should be capitalized in the final output string. Ignore and remove phrases like "or equivalent", "permission of instructor", or anything else that does not relate to a specific course. If there are no course prerequisites, return an empty string.\n\nExamples:\nInput: "Math 350 or COMP 362 (or equivalent)."\nOutput: (MATH 350 OR COMP 362)\n\nInput: "COMP 251 and COMP 250 and (MATH 140 or MATH 240 or MATH 200)"\nOutput: COMP 251 AND COMP 250 AND (MATH 140 OR MATH 240 OR MATH 200)\n\nInput: "COMP 251 or equivalent, MATH 223"\nOutput: COMP 251 AND MATH 223\n\nInput: "MATH 140 or equivalent. COMP 202 or COMP 204 or COMP 208 (or equivalent)."\nOutput: "MATH 140 AND (COMP 202 OR COMP 204 OR COMP 208)"\n\nInput: "ATOC 752D1"\nOutput: "ATOC 752D1"`,
           },
           {
             role: "user",
@@ -214,4 +214,35 @@ const scrapeCoursesFromDept = async (dept) => {
   }
 };
 
-scrapeCoursesFromDept("redm");
+const scienceDepts = [
+  "anat",
+  "atoc",
+  "bioc",
+  "biol",
+  "biot",
+  "chem",
+  "comp",
+  "epsc",
+  "esys",
+  "exmd",
+  "geog",
+  "math",
+  "mimm",
+  "neur",
+  "nutr",
+  "path",
+  "phar",
+  "phys",
+  "phgy",
+  "psyt",
+  "psyc",
+  "redm",
+];
+
+const run = async () => {
+  for (let i = 0; i < scienceDepts.length; i++) {
+    await scrapeCoursesFromDept(scienceDepts[i]);
+  }
+};
+
+run();
