@@ -1,217 +1,119 @@
 const puppeteer = require("puppeteer");
+const axios = require("axios");
+const xml2js = require("xml2js");
 const fs = require("fs");
 
-const scrapeProgramListingPages = async (startingURL) => {
-  if (!startingURL) throw new Error("No starting URL provided");
+const CONCURRENCY = 10; // number of parallel browser pages
 
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-  await page.goto(startingURL, {
-    waitUntil: "networkidle0",
-  });
+async function extractSitemapLinks() {
+  const { data } = await axios.get(
+    "https://coursecatalogue.mcgill.ca/sitemap.xml",
+    {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      maxRedirects: 5,
+    },
+  );
 
-  // Collect anchor links
-  const anchorLinks = await page.evaluate(() => {
-    const parent =
-      document.getElementById("departmentstextcontainer") ||
-      document.getElementById("academicunitstextcontainer");
-    const links = [];
-
-    if (parent) {
-      const anchors = parent.querySelectorAll("li a");
-
-      for (const anchor of anchors) {
-        if (anchor.href) {
-          links.push(anchor.href);
-        }
-      }
-    }
-
-    return links;
-  });
-
-  const validLinks = [];
-  const invalidLinks = [];
-
-  // Visit each link and check for programs page
-  for (const link of anchorLinks) {
-    try {
-      await page.goto(link, { waitUntil: "networkidle0" });
-
-      const hasProgramsSection = await page.evaluate(() => {
-        return (
-          document.querySelector("a[href='#programstextcontainer']") !== null
-        );
-      });
-
-      if (hasProgramsSection) {
-        const finalLink = link + "#programstext";
-
-        validLinks.push(finalLink);
-        console.log("Found a page with program links", finalLink);
-      } else {
-        invalidLinks.push(link);
-        console.log("Unable to find a page with program links for", link);
-      }
-    } catch (err) {
-      throw err;
-    }
+  if (!data || String(data).trim().length === 0) {
+    throw new Error("Empty response from server");
   }
 
-  await browser.close();
-
-  // Populating program listing page links into JSON file
-  const existingData = JSON.parse(
-    fs.readFileSync("program-listing-pages.JSON", "utf8"),
-  );
-
-  // Populating valid links making sure to avoid duplicates
-  const uniqueValidLinks = validLinks.filter(
-    (item) => !existingData.valid.includes(item),
-  );
-  existingData.valid.push(...uniqueValidLinks);
-
-  // Populating invalid links making sure to avoid duplicates
-  const uniqueInvalidLinks = invalidLinks.filter(
-    (item) => !existingData.invalid.includes(item),
-  );
-  existingData.invalid.push(...uniqueInvalidLinks);
-
-  if (uniqueValidLinks.length == 0 && uniqueInvalidLinks.length == 0) {
-    console.log("No new valid or invalid links were found for ", startingURL);
-    return;
-  }
-  // Writing changes to JSON file
-  fs.writeFileSync(
-    "program-listing-pages.JSON",
-    JSON.stringify(existingData, null, 2),
-  );
-};
-
-const checkValidProgramLink = async (page, link) => {
-  await page.goto(link, {
-    waitUntil: "networkidle0",
+  const parsed = await xml2js.parseStringPromise(String(data), {
+    explicitArray: true,
   });
 
-  return await page.evaluate(() => {
-    return document.getElementById("programoverviewtexttab") !== null;
-  });
-};
-
-const scrapeProgramLinks = async () => {
-  const programListingPages = JSON.parse(
-    fs.readFileSync("program-listing-pages.JSON", "utf8"),
-  );
-
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-
-  const programLinks = []; // holds all program links collected
-
-  // Collecting program links from valid program listing pages
-  for (const link of programListingPages.valid) {
-    // Navigate to link
-    await page.goto(link, {
-      waitUntil: "networkidle0",
-    });
-
-    // Gathering all links on the page that may or may not link to a program page
-    const candidateLinks = await page.evaluate(() => {
-      const anchors = document.querySelectorAll("a[href*='/undergraduate/']");
-      const links = [];
-
-      for (const anchor of anchors) {
-        if (anchor.href) {
-          links.push(anchor.href);
-        }
-      }
-
-      return links;
-    });
-
-    // Filtering candidate links to only links that go to a program
-    for (const candidateLink of candidateLinks) {
-      if (await checkValidProgramLink(page, candidateLink)) {
-        console.log("Found a valid program link", candidateLink);
-        programLinks.push(candidateLink);
-      }
-    }
-  }
-
-  await browser.close();
-
-  // Writing program links to JSON file
-  const programs = JSON.parse(fs.readFileSync("program-links.JSON", "utf8"));
-
-  // filtering to program links not already collected in JSON file
-  const uniqueProgramLinks = [...new Set(programLinks)].filter(
-    (programLink) => !programs.includes(programLink),
-  );
-
-  programs.push(...uniqueProgramLinks);
-
-  fs.writeFileSync("program-links.JSON", JSON.stringify(programs, null, 2));
-};
-
-const main = async () => {
-  const startingURL = "https://coursecatalogue.mcgill.ca/en/undergraduate/";
-
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-  await page.goto(startingURL, {
-    waitUntil: "networkidle0",
-  });
-
-  // Collecting links for each undergrad studies section available at McGill
-  const undergraduatePages = await page.evaluate(() => {
-    const anchors = document.querySelectorAll(
-      "div.sitemap a[href*='/undergraduate/']",
+  if (parsed.urlset) {
+    return parsed.urlset.url.map((entry) => entry.loc[0]);
+  } else if (parsed.sitemapindex) {
+    return parsed.sitemapindex.sitemap.map((entry) => entry.loc[0]);
+  } else {
+    throw new Error(
+      "Unrecognized sitemap format: " + JSON.stringify(parsed).slice(0, 500),
     );
-    const links = [];
+  }
+}
 
-    for (const anchor of anchors) {
-      if (anchor.href) {
-        links.push(anchor.href);
+async function isPageAProgram(page, link) {
+  await page.goto(link, { waitUntil: "domcontentloaded", timeout: 15000 });
+  return page.evaluate(
+    () => document.getElementById("programoverviewtexttab") !== null,
+  );
+}
+
+async function runPool(links, browser) {
+  const programLinks = [];
+  const queue = [...links];
+
+  async function worker() {
+    const page = await browser.newPage();
+
+    // Block images, fonts, stylesheets — we only need the DOM
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (
+        ["image", "stylesheet", "font", "media"].includes(req.resourceType())
+      ) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    while (queue.length > 0) {
+      const link = queue.shift();
+      try {
+        const isProgram = await isPageAProgram(page, link);
+        if (isProgram) {
+          console.log("Program:", link);
+          programLinks.push(link);
+        }
+      } catch (err) {
+        console.warn(`Failed: ${link} — ${err.message}`);
       }
     }
 
-    return links;
-  });
+    await page.close();
+  }
 
-  const filteredPages = [];
+  // Spin up CONCURRENCY workers, all draining the same queue
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
-  for (const undergraduatePage of undergraduatePages) {
-    await page.goto(undergraduatePage, {
-      waitUntil: "networkidle0",
-    });
+  return programLinks;
+}
 
-    const hasAcademicUnits = await page.evaluate(() => {
-      var xpath = "//a[text()='Academic Units']";
-      var matchingElement = document.evaluate(
-        xpath,
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null,
-      ).singleNodeValue;
-      return matchingElement !== null;
-    });
+const collectPrograms = async () => {
+  const links = (await extractSitemapLinks()).filter((link) =>
+    link.includes("undergraduate"),
+  );
+  console.log(`Extracted ${links.length} links from sitemap`);
 
-    if (hasAcademicUnits) {
-      console.log("adding " + undergraduatePage + " to filtered");
-      filteredPages.push(undergraduatePage);
+  const browser = await puppeteer.launch({ headless: true });
+
+  try {
+    const programLinks = await runPool(links, browser);
+
+    // Load existing, merge, dedupe, save
+    const existing = JSON.parse(fs.readFileSync("program-links.json", "utf8"));
+    const newLinks = programLinks.filter((l) => !existing.includes(l));
+
+    if (newLinks.length > 0) {
+      const merged = [...existing, ...newLinks];
+      fs.writeFileSync("program-links.json", JSON.stringify(merged, null, 2));
+      console.log(
+        `Added ${newLinks.length} new program links (${merged.length} total)`,
+      );
+    } else {
+      console.log("No new program links found");
     }
+  } finally {
+    await browser.close();
   }
-
-  await browser.close();
-
-  for (const undergraduatePage of filteredPages) {
-    await scrapeProgramListingPages(undergraduatePage);
-  }
-
-  // Collecting program links
-  await scrapeProgramLinks();
 };
 
-//main();
-scrapeProgramLinks();
+collectPrograms();
