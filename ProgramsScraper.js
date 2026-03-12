@@ -1,8 +1,6 @@
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 
-const scrapeProgramLinks = () => {};
-
 const scrapeProgramListingPages = async (startingURL) => {
   if (!startingURL) throw new Error("No starting URL provided");
 
@@ -90,6 +88,71 @@ const scrapeProgramListingPages = async (startingURL) => {
   );
 };
 
+const checkValidProgramLink = async (page, link) => {
+  await page.goto(link, {
+    waitUntil: "networkidle0",
+  });
+
+  return await page.evaluate(() => {
+    return document.getElementById("programoverviewtexttab") !== null;
+  });
+};
+
+const scrapeProgramLinks = async () => {
+  const programListingPages = JSON.parse(
+    fs.readFileSync("program-listing-pages.JSON", "utf8"),
+  );
+
+  const browser = await puppeteer.launch();
+  const page = await browser.newPage();
+
+  const programLinks = []; // holds all program links collected
+
+  // Collecting program links from valid program listing pages
+  for (const link of programListingPages.valid) {
+    // Navigate to link
+    await page.goto(link, {
+      waitUntil: "networkidle0",
+    });
+
+    // Gathering all links on the page that may or may not link to a program page
+    const candidateLinks = await page.evaluate(() => {
+      const anchors = document.querySelectorAll("a[href*='/undergraduate/']");
+      const links = [];
+
+      for (const anchor of anchors) {
+        if (anchor.href) {
+          links.push(anchor.href);
+        }
+      }
+
+      return links;
+    });
+
+    // Filtering candidate links to only links that go to a program
+    for (const candidateLink of candidateLinks) {
+      if (await checkValidProgramLink(page, candidateLink)) {
+        console.log("Found a valid program link", candidateLink);
+        programLinks.push(candidateLink);
+      }
+    }
+  }
+
+  await browser.close();
+
+  // Writing program links to JSON file
+  const programs = JSON.parse(fs.readFileSync("program-links.JSON", "utf8"));
+
+  // filtering to program links not already collected in JSON file
+  const uniqueProgramLinks = [...new Set(programLinks)].filter(
+    (programLink) => !programs.includes(programLink),
+  );
+
+  programs.push(...uniqueProgramLinks);
+
+  fs.writeFileSync("program-links.JSON", JSON.stringify(programs, null, 2));
+};
+
 const main = async () => {
   const startingURL = "https://coursecatalogue.mcgill.ca/en/undergraduate/";
 
@@ -140,13 +203,15 @@ const main = async () => {
     }
   }
 
-  console.log("filtered", filteredPages);
-
   await browser.close();
 
   for (const undergraduatePage of filteredPages) {
     await scrapeProgramListingPages(undergraduatePage);
   }
+
+  // Collecting program links
+  await scrapeProgramLinks();
 };
 
-main();
+//main();
+scrapeProgramLinks();
